@@ -240,7 +240,7 @@
                             </svg>
                         </div>
                         <h3 class="text-lg font-bold text-white mb-2">Import Dataset</h3>
-                        <p class="text-zinc-400 text-xs font-medium mb-6 px-2 leading-relaxed">Drop your .xlsx file here. Our engine automatically detects names and numbers.</p>
+                        <p class="text-zinc-400 text-xs font-medium mb-6 px-2 leading-relaxed">Drop your .xlsx file here. Our engine automatically detects names and numbers anywhere in the row.</p>
                         
                         <div class="bg-indigo-500/20 text-indigo-300 text-xs font-bold px-6 py-3 rounded-xl border border-indigo-500/30 mb-4 transition-colors hover:bg-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.2)]">
                             Select File
@@ -261,12 +261,22 @@
                             <div class="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.8)] hidden" id="liveIndicator"></div>
                             <h4 class="font-bold text-sm text-zinc-200 uppercase tracking-widest">Processing Grid</h4>
                         </div>
-                        <button id="downloadBtn" onclick="exportToExcel()" class="hidden bg-white text-black px-4 py-2 rounded-lg text-xs font-extrabold hover:bg-zinc-200 transition-all shadow-[0_0_15px_rgba(255,255,255,0.3)] flex items-center">
-                            <svg class="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                            Export Data
-                        </button>
+                        <div class="flex items-center space-x-2">
+                            <!-- Copy Fallback Button -->
+                            <button id="copyBtn" onclick="copyToClipboard()" class="hidden bg-white/10 text-white px-4 py-2 rounded-lg text-xs font-extrabold hover:bg-white/20 transition-all flex items-center border border-white/10">
+                                <svg class="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                                Copy
+                            </button>
+                            <!-- Export Button -->
+                            <button id="downloadBtn" onclick="exportToExcel()" class="hidden bg-white text-black px-4 py-2 rounded-lg text-xs font-extrabold hover:bg-zinc-200 transition-all shadow-[0_0_15px_rgba(255,255,255,0.3)] flex items-center">
+                                <svg class="w-3.5 h-3.5 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                </svg>
+                                Export Data
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Table Area -->
@@ -394,7 +404,10 @@
             dropZone.classList.remove('drag-active');
             handleFile(e.dataTransfer.files[0]);
         };
-        fileInput.onchange = (e) => handleFile(e.target.files[0]);
+        fileInput.onchange = (e) => {
+            handleFile(e.target.files[0]);
+            e.target.value = ''; // Allow re-uploading the exact same file
+        };
 
         function handleFile(file) {
             if (!file) return;
@@ -405,15 +418,22 @@
             `;
 
             setTimeout(() => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const data = new Uint8Array(e.target.result);
-                    const workbook = XLSX.read(data, { type: 'array' });
-                    const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-                    const json = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
-                    processJsonData(json);
-                };
-                reader.readAsArrayBuffer(file);
+                try {
+                    const reader = new FileReader();
+                    reader.onload = (e) => {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const json = XLSX.utils.sheet_to_json(firstSheet, { header: 1 });
+                        processJsonData(json);
+                    };
+                    reader.readAsArrayBuffer(file);
+                } catch (error) {
+                    console.error("Upload error:", error);
+                    document.getElementById('emptyState').innerHTML = `
+                        <p class="font-medium text-rose-400 text-sm">Error reading file. Please try again.</p>
+                    `;
+                }
             }, 600); 
         }
 
@@ -423,28 +443,32 @@
             let failedCount = 0;
 
             rows.forEach((row, index) => {
-                let cell1 = row[0]?.toString().trim() || "";
-                let cell2 = row[1]?.toString().trim() || "";
-                
+                if (!row || !Array.isArray(row)) return;
+
                 let mobileRaw = "";
                 let nameRaw = "";
 
-                // Smart Auto-Detect
-                const cell1Nums = cell1.replace(/[^0-9]/g, "");
-                const cell2Nums = cell2.replace(/[^0-9]/g, "");
+                // Ultra-Smart Scan: Look across all columns in the row dynamically
+                for (let i = 0; i < row.length; i++) {
+                    let cellVal = row[i]?.toString().trim() || "";
+                    let numsOnly = cellVal.replace(/[^0-9]/g, "");
 
-                if (cell2Nums.length >= 10 && cell1Nums.length < 10) {
-                    mobileRaw = cell2;
-                    nameRaw = cell1;
-                } else {
-                    mobileRaw = cell1; 
-                    nameRaw = cell2;
+                    if (numsOnly.length >= 10 && !mobileRaw) {
+                        mobileRaw = cellVal; // Found the mobile number
+                    } else if (cellVal.length > 0 && !nameRaw && cellVal.toLowerCase() !== "mobile number" && cellVal.toLowerCase() !== "phone") {
+                        nameRaw = cellVal; // Found a potential name
+                    }
                 }
                 
-                const numOnly = mobileRaw.replace(/[^0-9]/g, "");
-                if (index === 0 && numOnly.length === 0) return;
+                // If no mobile number is found in this row, skip it
+                if (!mobileRaw) return;
 
-                if (mobileRaw && numOnly.length > 0) {
+                const numOnly = mobileRaw.replace(/[^0-9]/g, "");
+                
+                // Safety check to skip header rows
+                if (mobileRaw.toLowerCase().includes("number") || mobileRaw.toLowerCase().includes("phone")) return;
+
+                if (mobileRaw && numOnly.length >= 10) {
                     const state = getIndianState(mobileRaw);
                     bulkDataResults.push({ "Name": nameRaw, "Mobile Number": mobileRaw, "State": state });
                     if (!state.includes("Invalid") && !state.includes("Unmapped")) validCount++;
@@ -454,8 +478,47 @@
 
             updateStats(bulkDataResults.length, validCount, failedCount);
             renderResultsTable();
-            document.getElementById('downloadBtn').classList.remove('hidden');
-            document.getElementById('liveIndicator').classList.remove('hidden');
+            
+            if (bulkDataResults.length > 0) {
+                document.getElementById('downloadBtn').classList.remove('hidden');
+                document.getElementById('copyBtn').classList.remove('hidden');
+                document.getElementById('liveIndicator').classList.remove('hidden');
+            } else {
+                document.getElementById('emptyState').innerHTML = `
+                    <p class="font-medium text-rose-400 text-sm">No valid mobile numbers found in this file.</p>
+                `;
+            }
+        }
+
+        function copyToClipboard() {
+            if (bulkDataResults.length === 0) return;
+            
+            // Format data for clipboard (TSV format pastes perfectly into Excel/Sheets)
+            const headers = "Name\tMobile Number\tState";
+            const rows = bulkDataResults.map(r => `${r.Name || 'Not provided'}\t${r["Mobile Number"]}\t${r.State}`).join("\n");
+            const textToCopy = `${headers}\n${rows}`;
+            
+            const textArea = document.createElement("textarea");
+            textArea.value = textToCopy;
+            document.body.appendChild(textArea);
+            textArea.select();
+            
+            try {
+                document.execCommand('copy');
+                const btn = document.getElementById('copyBtn');
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = `<svg class="w-3.5 h-3.5 mr-1.5 text-emerald-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg> Copied!`;
+                btn.classList.replace('text-white', 'text-emerald-400');
+                
+                setTimeout(() => {
+                    btn.innerHTML = originalHtml;
+                    btn.classList.replace('text-emerald-400', 'text-white');
+                }, 2000);
+            } catch (err) {
+                console.error("Copy failed", err);
+            }
+            
+            document.body.removeChild(textArea);
         }
 
         function downloadTemplate(event) {
@@ -478,6 +541,8 @@
 
         function renderResultsTable() {
             const container = document.getElementById('tableContent');
+            if (bulkDataResults.length === 0) return; // Keep empty state if no data
+            
             let html = `<table class="w-full text-left border-collapse">
                 <thead class="sticky top-0 bg-black/80 backdrop-blur-md z-10 shadow-[0_1px_0_rgba(255,255,255,0.05)]">
                     <tr>
